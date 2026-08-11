@@ -1,0 +1,32 @@
+[project]
+name = "lead-platform"
+version = "2.0.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.120",
+    "uvicorn[standard]>=0.38",
+    "sqlalchemy[asyncio]>=2.0.45",
+    "asyncpg>=0.30",
+    "alembic>=1.16",
+    "pydantic-settings>=2.8",
+    "argon2-cffi>=24",
+    "pyjwt>=2.10",
+    "celery[redis]>=5.6",
+    "redis>=5.3",
+    "httpx>=0.28",
+    "structlog>=24",
+    "prometheus-client>=0.22",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=0.26",
+    "httpx>=0.28",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
