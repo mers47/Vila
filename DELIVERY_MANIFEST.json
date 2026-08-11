@@ -1,0 +1,41 @@
+{
+  "project": "lead-platform-enterprise-v2",
+  "version": "2.0.0",
+  "release_type": "enterprise-hardened",
+  "build_date": "2026-08-11",
+  "components": {
+    "backend": {
+      "language": "python",
+      "version": "3.13",
+      "framework": "FastAPI",
+      "database": "PostgreSQL 18.4",
+      "cache": "Redis 8.6",
+      "worker": "Celery 5.6"
+    },
+    "frontend": {
+      "language": "typescript",
+      "framework": "Next.js 16.3",
+      "runtime": "Node 24 LTS"
+    },
+    "infrastructure": {
+      "orchestration": "Docker Compose",
+      "reverse_proxy": "nginx:1.29.1-alpine",
+      "networks": ["backend (internal)", "edge"]
+    }
+  },
+  "providers": [
+    "WhatsApp Cloud API v26.0",
+    "Instagram Graph API v26.0",
+    "Telegram Bot API",
+    "Eitaa API",
+    "Rubika Bot API",
+    "Google Places API"
+  ],
+  "files": 129,
+  "tests": 23,
+  "release_gates": [
+    "Full container build (Docker daemon required)",
+    "npm/PyPI registry access for lockfile resolution",
+    "Live provider acceptance tests"
+  ]
+}
