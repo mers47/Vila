@@ -1,15 +1,29 @@
-import random
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import httpx
 
 
-def full_jitter_backoff(attempt: int, base_seconds: float = 2.0, cap_seconds: float = 120.0) -> float:
-    exp = min(cap_seconds, base_seconds * (2 ** attempt))
-    return random.uniform(0, exp)
+@dataclass(frozen=True)
+class RetryHint:
+    retryable: bool
+    retry_after_seconds: int | None = None
 
 
-def parse_retry_after(header_value: str | None) -> int | None:
-    if not header_value:
-        return None
-    try:
-        return int(header_value)
-    except ValueError:
-        return None
+def response_retry_hint(response: httpx.Response) -> RetryHint:
+    status = response.status_code
+    retryable = status == 429 or 500 <= status <= 599
+    retry_after = None
+    header = response.headers.get("retry-after")
+    if header and header.isdigit():
+        retry_after = max(1, min(int(header), 86400))
+    if status == 429 and retry_after is None:
+        try:
+            data = response.json()
+            value = ((data.get("parameters") or {}).get("retry_after")) if isinstance(data, dict) else None
+            if value is not None:
+                retry_after = max(1, min(int(value), 86400))
+        except Exception:
+            pass
+    return RetryHint(retryable, retry_after)
