@@ -1,6 +1,8 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,34 +10,48 @@ from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.entities import User, UserSession
 
+bearer = HTTPBearer(auto_error=False)
 
-async def get_current_user(
+
+async def current_user(
     request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: AsyncSession = Depends(get_db),
-    access_token: str | None = Cookie(None),
 ) -> User:
-    if not access_token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            access_token = auth_header[7:]
-    if not access_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    token = credentials.credentials if credentials is not None else request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
     try:
-        decoded = decode_token(access_token, "access")
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        decoded = decode_token(token, "access")
+        user_id = UUID(decoded.subject)
+        session_id = UUID(decoded.session_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
 
-    session = await db.scalar(select(UserSession).where(UserSession.refresh_jti == decoded.jti))
-    if not session or session.revoked_at:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+    now = datetime.now(timezone.utc)
+    row = await db.execute(
+        select(User, UserSession)
+        .join(UserSession, UserSession.user_id == User.id)
+        .where(
+            User.id == user_id,
+            User.is_active.is_(True),
+            UserSession.id == session_id,
+            UserSession.revoked_at.is_(None),
+            UserSession.expires_at > now,
+        )
+    )
+    result = row.first()
+    if not result:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="inactive or revoked session")
+    return result[0]
 
-    user = await db.get(User, UUID(decoded.subject))
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return user
 
+def require_roles(*roles: str):
+    allowed = frozenset(roles)
 
-async def get_current_admin(user: User = Depends(get_current_user)) -> User:
-    if user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
-    return user
+    async def dependency(user: User = Depends(current_user)) -> User:
+        if user.role not in allowed:
+            raise HTTPException(status_code=403, detail="insufficient role")
+        return user
+
+    return dependency
