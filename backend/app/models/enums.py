@@ -35,7 +35,6 @@ class ConsentStatus(StrEnum):
     UNKNOWN = "UNKNOWN"
     OPTED_IN = "OPTED_IN"
     OPTED_OUT = "OPTED_OUT"
-    IMPLIED = "IMPLIED"
 
 
 class MessageDirection(StrEnum):
