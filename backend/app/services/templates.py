@@ -1,16 +1,12 @@
-TEMPLATES = {
-    "fa": {
-        "intro": "سلام {business_name} عزیز،\nما {company_name} هستیم و خدمات بازاریابی ارائه میدیم.\nاگر تمایل داشتید، خوشحال میشیم بیشتر صحبت کنیم.",
-        "follow_up": "سلام مجدد {business_name} جان،\nپیام قبلی ما رو دریافت کردید؟ خوشحال میشیم بدونیم نظرتون چیه.",
-    }
-}
+from string import Formatter
+
+ALLOWED_FIELDS = {"business_name", "industry", "city", "province"}
 
 
-def render_template(name: str, language: str = "fa", **variables) -> str:
-    tmpl = TEMPLATES.get(language, {}).get(name, "")
-    if not tmpl:
-        return ""
-    try:
-        return tmpl.format(**variables)
-    except KeyError:
-        return tmpl
+def render_message(template: str, context: dict) -> str:
+    fields = {name for _, name, _, _ in Formatter().parse(template) if name}
+    unknown = fields - ALLOWED_FIELDS
+    if unknown:
+        raise ValueError(f"unsupported template fields: {sorted(unknown)}")
+    safe = {k: str(context.get(k) or "") for k in ALLOWED_FIELDS}
+    return template.format(**safe)
