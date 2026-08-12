@@ -1,4 +1,4 @@
-"""Persistent asyncio loop for Celery worker processes.
+"""Persistent asyncio loop for Celery prefork worker processes.
 
 Celery tasks are synchronous callables. Repeated asyncio.run() creates and destroys an
 EventLoop for every task, defeating asyncpg/httpx connection pooling. This runner keeps
@@ -20,11 +20,7 @@ _thread: threading.Thread | None = None
 
 def _loop_main(loop: asyncio.AbstractEventLoop) -> None:
     asyncio.set_event_loop(loop)
-    try:
-        loop.run_forever()
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+    loop.run_forever()
 
 
 def _ensure_loop() -> asyncio.AbstractEventLoop:
@@ -41,9 +37,4 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
 def run_async(coro: Coroutine[object, object, T], *, timeout: float | None = None) -> T:
     loop = _ensure_loop()
     future: Future[T] = asyncio.run_coroutine_threadsafe(coro, loop)
-    try:
-        return future.result(timeout=timeout)
-    except Exception:
-        if not future.cancelled():
-            future.cancel()
-        raise
+    return future.result(timeout=timeout)

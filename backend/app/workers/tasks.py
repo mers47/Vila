@@ -1,54 +1,90 @@
 from uuid import UUID
 
-from sqlalchemy import select
-
-from app.db.session import AsyncSessionLocal
-from app.models.entities import CampaignLead, DiscoveryJob, OutboxEvent
-from app.services.discovery_jobs import run_discovery_job
-from app.services.housekeeping import cleanup_outbox, cleanup_revoked_sessions
-from app.services.outreach import dispatch_message
+from app.db.session import SessionLocal
+from app.services.campaign_engine import process_due_campaign_leads
+from app.services.discovery_jobs import execute_discovery_job, due_job_ids
+from app.services.outreach import claim_outbox, deliver_outbox_event
+from app.services.housekeeping import run_housekeeping
+from app.workers.async_runner import run_async
 from app.workers.celery_app import celery_app
 
 
-@celery_app.task(name="app.workers.tasks.process_outbox")
-async def process_outbox():
-    async with AsyncSessionLocal() as db:
-        events = (await db.execute(select(OutboxEvent).where(OutboxEvent.status == "PENDING").limit(50))).scalars().all()
-        for event in events:
-            if event.topic == "outbound.send":
-                message_id = event.payload.get("message_id")
-                if message_id:
-                    await dispatch_message(db, UUID(message_id))
-                    event.status = "PROCESSED"
-        await db.commit()
+async def _process_campaign_queue():
+    async with SessionLocal() as db:
+        return await process_due_campaign_leads(db)
 
 
-@celery_app.task(name="app.workers.tasks.dispatch_outbound")
-async def dispatch_outbound(message_id: str):
-    async with AsyncSessionLocal() as db:
-        await dispatch_message(db, UUID(message_id))
-        await db.commit()
+@celery_app.task(name="app.workers.tasks.process_campaign_queue")
+def process_campaign_queue():
+    return run_async(_process_campaign_queue(), timeout=110)
 
 
-@celery_app.task(name="app.workers.tasks.run_discovery")
-async def run_discovery(job_id: str):
-    async with AsyncSessionLocal() as db:
-        await run_discovery_job(db, UUID(job_id))
-        await db.commit()
+async def _run_discovery_job(job_id: str):
+    async with SessionLocal() as db:
+        return await execute_discovery_job(db, UUID(job_id))
 
 
-@celery_app.task(name="app.workers.tasks.tick_discovery")
-async def tick_discovery():
-    async with AsyncSessionLocal() as db:
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
-        due_jobs = (await db.execute(select(DiscoveryJob).where(DiscoveryJob.is_enabled == True, DiscoveryJob.next_run_at <= now))).scalars().all()
-        for job in due_jobs:
-            run_discovery.delay(str(job.id))
+@celery_app.task(
+    name="app.workers.tasks.run_discovery_job",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_jitter=True,
+    retry_kwargs={"max_retries": 4},
+    soft_time_limit=280,
+    time_limit=300,
+)
+def run_discovery_job(job_id: str):
+    return run_async(_run_discovery_job(job_id), timeout=275)
 
 
-@celery_app.task(name="app.workers.tasks.run_housekeeping")
-async def run_housekeeping():
-    async with AsyncSessionLocal() as db:
-        await cleanup_outbox(db)
-        await cleanup_revoked_sessions(db)
+async def _scan_discovery_jobs():
+    async with SessionLocal() as db:
+        return await due_job_ids(db)
+
+
+@celery_app.task(name="app.workers.tasks.scan_discovery_jobs")
+def scan_discovery_jobs():
+    ids = run_async(_scan_discovery_jobs(), timeout=30)
+    queued = 0
+    for job_id in ids:
+        run_discovery_job.delay(str(job_id))
+        queued += 1
+    return queued
+
+
+async def _claim_outbox():
+    async with SessionLocal() as db:
+        return await claim_outbox(db)
+
+
+@celery_app.task(name="app.workers.tasks.drain_outbox")
+def drain_outbox():
+    claimed = run_async(_claim_outbox(), timeout=30)
+    published = 0
+    for event_id, lease_token in claimed:
+        try:
+            deliver_outbox_event_task.delay(str(event_id), lease_token)
+            published += 1
+        except Exception:
+            continue
+    return published
+
+
+async def _deliver_outbox(event_id: str, lease_token: str):
+    async with SessionLocal() as db:
+        return await deliver_outbox_event(db, UUID(event_id), lease_token)
+
+
+@celery_app.task(name="app.workers.tasks.deliver_outbox_event")
+def deliver_outbox_event_task(event_id: str, lease_token: str):
+    return run_async(_deliver_outbox(event_id, lease_token), timeout=110)
+
+
+async def _housekeeping():
+    async with SessionLocal() as db:
+        return await run_housekeeping(db)
+
+
+@celery_app.task(name="app.workers.tasks.housekeeping")
+def housekeeping():
+    return run_async(_housekeeping(), timeout=110)
