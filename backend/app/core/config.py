@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     outbox_max_attempts: int = 8
     outbox_retention_days: int = 14
     revoked_session_retention_days: int = 30
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_timeout: int = 5
+    db_pool_recycle: int = 1800
+    db_statement_timeout_ms: int = 15000
+    db_idle_in_transaction_timeout_ms: int = 30000
 
 
 @lru_cache
