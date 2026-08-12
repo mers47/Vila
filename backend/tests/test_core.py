@@ -1,95 +1,59 @@
-import pytest
-from datetime import timedelta
-
-from app.core.security import hash_password, verify_password, create_token, decode_token, DecodedToken
-from app.services.normalization import normalize_phone, normalize_username
+from app.services.normalization import normalize_phone, normalize_handle
 from app.services.policy import can_send
 from app.services.reply_classifier import classify_reply
-from app.services.url_safety import is_safe_url
-from app.services.templates import render_template
+from app.services.scoring import score_lead
 
 
-class TestPasswordHashing:
-    def test_hash_and_verify(self):
-        pw = "StrongP@ssw0rd!"
-        hashed = hash_password(pw)
-        assert verify_password(pw, hashed)
-        assert not verify_password("wrong", hashed)
-
-    def test_hash_is_unique(self):
-        pw = "test1234"
-        assert hash_password(pw) != hash_password(pw)
+def test_normalization():
+    assert normalize_phone("0912 123 4567") == "+989121234567"
+    assert normalize_handle(" @MyShop/ ") == "myshop"
 
 
-class TestTokenCreation:
-    def test_create_and_decode(self):
-        token = create_token("user-1", "access", timedelta(minutes=15), session_id="sess-1")
-        decoded = decode_token(token, "access")
-        assert decoded.subject == "user-1"
-        assert decoded.token_type == "access"
-        assert decoded.session_id == "sess-1"
-
-    def test_wrong_type_fails(self):
-        token = create_token("user-1", "access", timedelta(minutes=15), session_id="sess-1")
-        with pytest.raises(ValueError, match="invalid token type"):
-            decode_token(token, "refresh")
+def test_policy_opt_out_blocks():
+    assert not can_send("WHATSAPP", "OPTED_OUT").allowed
 
 
-class TestNormalization:
-    def test_phone_whatsapp(self):
-        assert normalize_phone("09121234567", "WHATSAPP") == "989121234567"
-        assert normalize_phone("+989121234567", "WHATSAPP") == "989121234567"
-
-    def test_username(self):
-        assert normalize_username("@TestUser") == "testuser"
-        assert normalize_username("  TestUser  ") == "testuser"
+def test_policy_whatsapp_template_requires_opt_in():
+    assert not can_send("WHATSAPP", "UNKNOWN", message_kind="template").allowed
+    assert can_send("WHATSAPP", "OPTED_IN", message_kind="template").allowed
 
 
-class TestPolicy:
-    def test_can_send_valid(self):
-        ok, reason = can_send("WHATSAPP", "IMPLIED", True, False, True)
-        assert ok
-        assert reason is None
-
-    def test_can_send_suppressed(self):
-        ok, reason = can_send("WHATSAPP", "IMPLIED", True, True, True)
-        assert not ok
-        assert reason == "suppressed"
-
-    def test_can_send_opted_out(self):
-        ok, reason = can_send("WHATSAPP", "OPTED_OUT", True, False, True)
-        assert not ok
-        assert reason == "opted_out"
+def test_policy_whatsapp_free_text_needs_service_window():
+    assert not can_send("WHATSAPP", "OPTED_IN", message_kind="text").allowed
 
 
-class TestReplyClassifier:
-    def test_optout(self):
-        label, conf = classify_reply("لطفا لغو کنید")
-        assert label == "OPTOUT"
-        assert conf >= 70
-
-    def test_positive(self):
-        label, conf = classify_reply("بله موافقم")
-        assert label == "POSITIVE"
-
-    def test_neutral(self):
-        label, conf = classify_reply("سلام")
-        assert label == "NEUTRAL"
+def test_reply_classifier():
+    assert classify_reply("لطفا لیست قیمت همکاری رو بفرستید") == "PURCHASE_INTENT"
+    assert classify_reply("لطفا دیگه پیام ندید") == "OPT_OUT"
 
 
-class TestUrlSafety:
-    def test_safe_url(self):
-        assert is_safe_url("https://example.com")
-
-    def test_blocked_localhost(self):
-        assert not is_safe_url("http://localhost:8000")
-
-    def test_blocked_internal(self):
-        assert not is_safe_url("http://127.0.0.1")
+def test_scoring():
+    result = score_lead(industry_match=True, city_match=True, active_online=True, has_contact=True,
+                        has_social=True, product_match=True, suitable_size=True, need_signal=True)
+    assert result.score == 100
+    assert result.temperature == "HOT"
 
 
-class TestTemplates:
-    def test_render_persian(self):
-        result = render_template("intro", "fa", business_name="تست", company_name="شرکت ما")
-        assert "تست" in result
-        assert "شرکت ما" in result
+def test_public_web_rejects_private_ip():
+    import asyncio
+    import pytest
+    from app.services.url_safety import assert_public_url
+    with pytest.raises(ValueError):
+        asyncio.run(assert_public_url("http://127.0.0.1/internal"))
+
+
+def test_public_social_link_parsing():
+    from app.services.url_safety import social_handle, whatsapp_number
+    assert social_handle("https://instagram.com/Example.Shop/") == "Example.Shop"
+    assert social_handle("https://t.me/example_channel") == "example_channel"
+    assert whatsapp_number("https://wa.me/989121234567") == "+989121234567"
+
+
+def test_handle_channels_are_not_messaging_channels():
+    assert not can_send("INSTAGRAM_HANDLE", "OPTED_IN", message_kind="text").allowed
+    assert not can_send("TELEGRAM_HANDLE", "OPTED_IN", message_kind="text", interaction_started=True).allowed
+
+
+def test_policy_whatsapp_marketing_template_requires_opt_in():
+    assert not can_send("WHATSAPP", "UNKNOWN", message_kind="marketing_template").allowed
+    assert can_send("WHATSAPP", "OPTED_IN", message_kind="marketing_template").allowed
