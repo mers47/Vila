@@ -1,36 +1,42 @@
-import httpx
-
 from app.connectors.http import HttpClient
 from app.core.config import get_settings
 
 
 class GooglePlacesConnector:
-    def __init__(self):
-        s = get_settings()
-        self.api_key = s.google_places_api_key
-        self.language = s.google_places_language
+    base_url = "https://places.googleapis.com/v1/places:searchText"
 
-    async def nearby_search(self, query: str, city: str | None = None, max_results: int = 60) -> list[dict]:
-        if not self.api_key:
-            return []
-        client = await HttpClient.get_client()
-        location_query = f"{query} {city}" if city else query
-        try:
-            resp = await client.get(
-                "https://maps.googleapis.com/maps/api/place/textsearch/json",
-                params={"query": location_query, "language": self.language, "key": self.api_key},
-            )
-            data = resp.json()
-            results = data.get("results", [])[:max_results]
-            return [
-                {
-                    "business_name": r.get("name"),
-                    "address": r.get("formatted_address"),
-                    "place_id": r.get("place_id"),
-                    "rating": r.get("rating"),
-                    "types": r.get("types", []),
-                }
-                for r in results
-            ]
-        except Exception:
-            return []
+    def __init__(self):
+        self.settings = get_settings()
+        self.http = HttpClient()
+
+    async def text_search(self, query: str, *, max_results: int = 60) -> list[dict]:
+        if not self.settings.google_places_api_key:
+            raise RuntimeError("GOOGLE_PLACES_API_KEY is not configured")
+        max_results = max(1, min(max_results, 60))
+        headers = {
+            "X-Goog-Api-Key": self.settings.google_places_api_key,
+            "X-Goog-FieldMask": ",".join([
+                "places.id", "places.displayName", "places.formattedAddress",
+                "places.nationalPhoneNumber", "places.internationalPhoneNumber",
+                "places.websiteUri", "places.primaryType", "places.businessStatus", "nextPageToken"
+            ]),
+            "Content-Type": "application/json",
+        }
+        results: list[dict] = []
+        page_token: str | None = None
+        while len(results) < max_results:
+            payload = {
+                "textQuery": query,
+                "languageCode": self.settings.google_places_language,
+                "pageSize": min(20, max_results - len(results)),
+            }
+            if page_token:
+                payload["pageToken"] = page_token
+            response = await self.http.request("POST", self.base_url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            results.extend(data.get("places", []))
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+        return results[:max_results]

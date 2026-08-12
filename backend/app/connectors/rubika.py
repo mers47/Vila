@@ -1,34 +1,29 @@
-import httpx
-
-from app.connectors.base import BaseConnector
+from app.connectors.base import MessagingConnector, SendResult
 from app.connectors.http import HttpClient
-from app.connectors.result import SendResult
+from app.connectors.result import success_result, failure_result
 from app.core.config import get_settings
 
 
-class RubikaConnector(BaseConnector):
+class RubikaConnector(MessagingConnector):
     def __init__(self):
-        s = get_settings()
-        self.bot_token = s.rubika_bot_token
+        self.settings = get_settings()
+        self.http = HttpClient()
 
-    async def send_text(self, to: str, text: str) -> SendResult:
-        if not self.bot_token:
-            return SendResult(success=False, error_code="NOT_CONFIGURED")
-        client = await HttpClient.get_client()
-        try:
-            resp = await client.post(
-                "https://messenger.rubika.ir/api/",
-                json={"api_version": "1", "method": "sendMessage", "input": {"bot_token": self.bot_token, "chat_id": to, "text": text}},
-            )
-            data = resp.json()
-            if data.get("data_enc"):
-                return SendResult(success=True, status="SENT", http_status=200, raw=data)
-            return SendResult(success=False, http_status=resp.status_code, raw=data)
-        except Exception as e:
-            return SendResult(success=False, error_detail=str(e))
-
-    async def send_template(self, to: str, template_name: str, language: str, components: list | None = None) -> SendResult:
-        return SendResult(success=False, error_detail="Rubika does not support templates")
-
-    async def get_status(self, message_id: str) -> SendResult:
-        return SendResult(success=True, external_id=message_id, status="SENT")
+    async def send_text(self, recipient: str, text: str, **kwargs) -> SendResult:
+        token = self.settings.rubika_bot_token
+        if not token:
+            return SendResult(False, error_code="CONFIG", error_detail="Rubika token missing")
+        url = f"https://botapi.rubika.ir/v3/{token}/sendMessage"
+        response = await self.http.request("POST", url, json={"chat_id": recipient, "text": text})
+        data = response.json() if response.content else {}
+        nested = data.get("data") if isinstance(data, dict) else None
+        result = data.get("result") if isinstance(data, dict) else None
+        msg_id = (
+            (nested or {}).get("message_id") if isinstance(nested, dict) else None
+        ) or ((result or {}).get("message_id") if isinstance(result, dict) else None) or (
+            data.get("message_id") if isinstance(data, dict) else None
+        )
+        explicit_error = data.get("error") if isinstance(data, dict) else None
+        if response.is_success and not explicit_error:
+            return success_result(response, str(msg_id) if msg_id else None)
+        return failure_result(response)
