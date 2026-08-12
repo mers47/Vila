@@ -1,39 +1,54 @@
-import enum
+from enum import StrEnum
 
 
-class LeadStatus(str, enum.Enum):
+class LeadStatus(StrEnum):
     NEW = "NEW"
-    CONTACTED = "CONTACTED"
-    ENGAGED = "ENGAGED"
     QUALIFIED = "QUALIFIED"
-    CONVERTED = "CONVERTED"
-    DISQUALIFIED = "DISQUALIFIED"
+    CONTACTABLE = "CONTACTABLE"
+    CONTACTED = "CONTACTED"
+    REPLIED = "REPLIED"
+    INTERESTED = "INTERESTED"
+    HOT = "HOT"
+    FOLLOW_UP = "FOLLOW_UP"
+    NOT_INTERESTED = "NOT_INTERESTED"
+    DO_NOT_CONTACT = "DO_NOT_CONTACT"
+    HANDED_TO_SALES = "HANDED_TO_SALES"
+    DORMANT = "DORMANT"
 
 
-class Channel(str, enum.Enum):
+class Channel(StrEnum):
     WHATSAPP = "WHATSAPP"
     INSTAGRAM = "INSTAGRAM"
+    INSTAGRAM_HANDLE = "INSTAGRAM_HANDLE"
     TELEGRAM = "TELEGRAM"
+    TELEGRAM_HANDLE = "TELEGRAM_HANDLE"
     EITAA = "EITAA"
+    EITAA_HANDLE = "EITAA_HANDLE"
     RUBIKA = "RUBIKA"
+    RUBIKA_HANDLE = "RUBIKA_HANDLE"
+    EMAIL = "EMAIL"
+    PHONE = "PHONE"
+    WEB = "WEB"
 
 
-class ConsentStatus(str, enum.Enum):
+class ConsentStatus(StrEnum):
     UNKNOWN = "UNKNOWN"
     OPTED_IN = "OPTED_IN"
     OPTED_OUT = "OPTED_OUT"
     IMPLIED = "IMPLIED"
 
 
-class MessageDirection(str, enum.Enum):
-    INBOUND = "INBOUND"
+class MessageDirection(StrEnum):
     OUTBOUND = "OUTBOUND"
+    INBOUND = "INBOUND"
 
 
-class MessageStatus(str, enum.Enum):
+class MessageStatus(StrEnum):
     QUEUED = "QUEUED"
+    RETRYING = "RETRYING"
     SENT = "SENT"
     DELIVERED = "DELIVERED"
     READ = "READ"
     FAILED = "FAILED"
-    REJECTED = "REJECTED"
+    BLOCKED_POLICY = "BLOCKED_POLICY"
+    CANCELLED = "CANCELLED"

@@ -1,31 +1,15 @@
 import hashlib
 import hmac
 
-from app.core.config import get_settings
 
-
-def verify_meta_signature(signature: str, body: bytes) -> bool:
-    s = get_settings()
-    if not s.meta_app_secret:
-        return True
-    expected = hmac.new(
-        s.meta_app_secret.encode(), body, hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(f"sha256={expected}", signature)
-
-
-def verify_telegram_secret(secret: str) -> bool:
-    s = get_settings()
-    if not s.telegram_webhook_secret:
-        return True
-    return hmac.compare_digest(s.telegram_webhook_secret, secret)
-
-
-def verify_rubika_signature(signature: str, body: bytes) -> bool:
-    s = get_settings()
-    if not s.rubika_webhook_secret:
-        return True
-    expected = hmac.new(
-        s.rubika_webhook_secret.encode(), body, hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(expected, signature)
+def verify_meta_signature(raw_body: bytes, signature_header: str | None, app_secret: str | None) -> bool:
+    """Verify Meta (WhatsApp/Instagram) webhook signatures.
+    
+    CRITICAL: If app_secret is None or empty, we MUST reject the request.
+    In production this is always configured.
+    """
+    if not app_secret or not signature_header or not signature_header.startswith("sha256="):
+        return False
+    expected = hmac.new(app_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    supplied = signature_header.split("=", 1)[1]
+    return hmac.compare_digest(expected, supplied)

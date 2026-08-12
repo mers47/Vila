@@ -13,12 +13,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 15s
     networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   redis:
     image: redis:8.6-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    command:
+      - redis-server
+      - --appendonly yes
+      - --maxmemory-policy noeviction
+      - --maxmemory 256mb
+      - --save 900 1
+      - --save 300 10
     volumes:
       - redis_data:/data
     healthcheck:
@@ -26,7 +37,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 10s
     networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   migrate:
     build:
@@ -58,11 +74,16 @@ services:
       interval: 20s
       timeout: 5s
       retries: 5
+      start_period: 10s
     networks: [backend, edge]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   worker-control:
     init: true
-    stop_grace_period: 30s
+    stop_grace_period: 60s
     build:
       context: ./backend
       target: runtime
@@ -75,10 +96,14 @@ services:
       redis:
         condition: service_healthy
     networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   worker-outbound:
     init: true
-    stop_grace_period: 30s
+    stop_grace_period: 60s
     build:
       context: ./backend
       target: runtime
@@ -91,10 +116,14 @@ services:
       redis:
         condition: service_healthy
     networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   worker-discovery:
     init: true
-    stop_grace_period: 30s
+    stop_grace_period: 60s
     build:
       context: ./backend
       target: runtime
@@ -107,6 +136,10 @@ services:
       redis:
         condition: service_healthy
     networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   beat:
     init: true
@@ -123,6 +156,10 @@ services:
       redis:
         condition: service_healthy
     networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
   test:
     build:
@@ -140,27 +177,39 @@ services:
       args:
         NEXT_PUBLIC_API_URL: /api/v1
     restart: unless-stopped
+    environment:
+      NODE_ENV: production
     depends_on:
       api:
         condition: service_healthy
     networks: [edge]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   nginx:
     init: true
     security_opt:
       - no-new-privileges:true
+    read_only: true
     image: nginx:1.29.1-alpine
     restart: unless-stopped
     ports:
       - "${HTTP_PORT:-8080}:80"
     volumes:
       - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - /tmp:/tmp
     depends_on:
       api:
         condition: service_healthy
       dashboard:
         condition: service_started
     networks: [edge]
+    deploy:
+      resources:
+        limits:
+          memory: 64M
 
 volumes:
   postgres_data:
