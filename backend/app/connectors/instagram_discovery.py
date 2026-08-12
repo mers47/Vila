@@ -1,39 +1,33 @@
-import httpx
-
+from urllib.parse import quote
 from app.connectors.http import HttpClient
 from app.core.config import get_settings
 
 
-class InstagramDiscoveryConnector:
+class InstagramBusinessDiscoveryConnector:
+    """Official Business Discovery lookup for an exact public professional username.
+
+    This intentionally does not scrape Instagram search/results pages or automate normal user accounts.
+    """
     def __init__(self):
-        s = get_settings()
-        self.access_token = s.instagram_discovery_access_token
-        self.ig_user_id = s.instagram_discovery_ig_user_id
+        self.settings = get_settings()
+        self.http = HttpClient()
 
-    async def search_businesses(self, query: str, max_results: int = 60) -> list[dict]:
-        if not self.access_token or not self.ig_user_id:
-            return []
-        client = await HttpClient.get_client()
-        try:
-            resp = await client.get(
-                f"https://graph.facebook.com/v26.0/ig_hashtag_search",
-                params={"user_id": self.ig_user_id, "q": query, "access_token": self.access_token},
-            )
-            data = resp.json()
-            results = data.get("data", [])[:max_results]
-            return [{"hashtag_id": r.get("id"), "name": r.get("name")} for r in results]
-        except Exception:
-            return []
-
-    async def get_business_profile(self, business_id: str) -> dict | None:
-        if not self.access_token:
-            return None
-        client = await HttpClient.get_client()
-        try:
-            resp = await client.get(
-                f"https://graph.facebook.com/v26.0/{business_id}",
-                params={"fields": "name,username,biography,website,followers_count,media_count", "access_token": self.access_token},
-            )
-            return resp.json()
-        except Exception:
-            return None
+    async def lookup(self, username: str) -> dict:
+        s = self.settings
+        if not s.instagram_discovery_access_token or not s.instagram_discovery_ig_user_id:
+            raise RuntimeError("Instagram Business Discovery credentials are missing")
+        clean = username.strip().lstrip("@").lower()
+        if not clean or len(clean) > 30:
+            raise ValueError("invalid Instagram username")
+        fields = (
+            f"business_discovery.username({clean})"
+            "{id,username,name,biography,website,followers_count,media_count,profile_picture_url}"
+        )
+        url = f"https://graph.facebook.com/{s.instagram_graph_version}/{quote(s.instagram_discovery_ig_user_id)}"
+        response = await self.http.request(
+            "GET", url, params={"fields": fields, "access_token": s.instagram_discovery_access_token}
+        )
+        if not response.is_success:
+            raise RuntimeError(f"Instagram Business Discovery failed: HTTP {response.status_code} {response.text[:500]}")
+        data = response.json()
+        return data.get("business_discovery") or {}
